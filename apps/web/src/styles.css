@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #10254a; background: #fff; font-synthesis: none; text-rendering: optimizeLegibility; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input, select, textarea { font: inherit; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid rgba(7,148,85,.2); outline-offset: 2px; }
+
+@layer components {
+  .page-title { @apply text-3xl font-extrabold tracking-[-0.03em] text-ink sm:text-4xl; }
+  .section-title { @apply text-base font-bold tracking-[-0.01em] text-ink; }
+  .button-primary { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-brand px-5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60; }
+  .button-secondary { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-5 text-sm font-bold text-ink transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60; }
+  .field { @apply block text-sm font-semibold text-ink; }
+  .field > input, .field > select, .field > textarea { @apply mt-2 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-normal text-ink shadow-sm transition placeholder:text-slate-400 hover:border-slate-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-emerald-100; }
+  .field-meta { @apply mt-2 flex min-h-4 items-start justify-between gap-3; }
+  .field-hint { @apply mt-2 text-xs font-normal text-muted; }
+  .upload-area { @apply mt-2 flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-slate-300 px-4 py-4 font-normal text-muted transition hover:border-brand hover:bg-emerald-50/40; }
+  .upload-area strong { @apply block text-sm font-semibold text-ink; }
+  .upload-area small { @apply mt-1 block text-xs; }
+  .language-switcher { @apply inline-flex items-center rounded-lg border border-line bg-slate-50 p-1; }
+  .language-switcher button { @apply min-w-9 rounded-md px-2 py-1 text-xs font-bold text-muted transition hover:text-ink; }
+  .language-switcher button.active { @apply bg-white text-brand shadow-sm; }
+}
+
+.map-grid { background-image: linear-gradient(rgba(135,151,170,.22) 1px, transparent 1px), linear-gradient(90deg, rgba(135,151,170,.22) 1px, transparent 1px); background-size: 44px 44px; transform: rotate(-7deg) scale(1.15); }

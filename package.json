@@ -1,0 +1,11 @@
+{
+  "name": "rbc-ev-station",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @rbc/web dev",
+    "build:web": "pnpm --filter @rbc/web build",
+    "test:web": "pnpm --filter @rbc/web test",
+    "lint:web": "pnpm --filter @rbc/web lint"
+  }
+}

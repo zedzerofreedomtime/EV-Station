@@ -1,0 +1,94 @@
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { Calculator, ChevronRight, Database, RefreshCw } from 'lucide-react'
+import { useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { DataStatus, DataStatusLegend } from '../components/DataStatus'
+import { MapPanel, RadiusLabel } from '../components/MapPanel'
+import { ErrorState, LoadingState } from '../components/PageState'
+import { useI18n } from '../i18n/I18nProvider'
+import { api } from '../services/api'
+import type { FranchisePlan, Metric } from '../types/domain'
+
+const metricKeys: Record<string, string> = { traffic: 'Road accessibility proxy', ev_demand: 'EV demand', population: 'Population', poi: 'Points of interest', competition: 'Competition', flood: 'Flood risk', electrical: 'Electrical readiness' }
+
+export function AnalysisPage() {
+  const { id = '' } = useParams()
+  const navigate = useNavigate()
+  const { t, language } = useI18n()
+  const [selectedMetricId, setSelectedMetricId] = useState<string>()
+  const [selectedPlanCode, setSelectedPlanCode] = useState<string>()
+  const analysis = useQuery({ queryKey: ['analysis', id], queryFn: () => api.getAnalysis(id), enabled: Boolean(id) })
+  const plans = useQuery({ queryKey: ['franchise-plans'], queryFn: api.getFranchisePlans })
+  const site = useQuery({ queryKey: ['site', analysis.data?.siteId], queryFn: () => api.getSite(analysis.data!.siteId), enabled: Boolean(analysis.data?.siteId) })
+  const rerun = useMutation({ mutationFn: () => api.runAnalysis(analysis.data!.siteId, analysis.data!.analysisRadiusMeters), onSuccess: run => navigate(`/analysis/${run.id}`) })
+  if (analysis.isLoading) return <LoadingState label="Loading analysis…" />
+  if (analysis.isError || !analysis.data) return <ErrorState message={t(analysis.error?.message || 'Analysis not found.')} />
+  const run = analysis.data
+  const selectedMetric = run.metrics.find(metric => metric.id === selectedMetricId) ?? run.metrics[0]
+  const selectedPlan = plans.data?.find(plan => plan.code === selectedPlanCode)
+  const dateLocale = language === 'th' ? 'th-TH' : 'en-US'
+  return <div>
+    <div className="flex flex-wrap items-start justify-between gap-5"><div><h1 className="page-title">{site.data?.name || t('Analysis result')}</h1><p className="mt-2 text-sm text-muted">{t('Analysis result')} · {new Date(run.createdAt).toLocaleString(dateLocale)}</p></div><button className="button-secondary" onClick={() => rerun.mutate()} disabled={rerun.isPending}><RefreshCw size={17} />{t(rerun.isPending ? 'Running…' : 'Run new analysis')}</button></div>
+    <div className="mt-8 grid gap-5 xl:grid-cols-[0.78fr_1.22fr]"><section className="rounded-xl border border-line p-6 shadow-panel"><div className="flex items-center justify-between"><h2 className="section-title">{t(run.overallScore === undefined ? 'Assessment unavailable' : 'Preliminary assessment')}</h2><DataStatus status={run.assessmentStatus} compact /></div><div className="grid min-h-44 place-items-center text-center"><div><div className="text-6xl font-extrabold tracking-tight">{run.overallScore?.toFixed(1) ?? '—'}</div><p className="mt-3 font-semibold">{t('Overall location score')}</p><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted">{t(run.overallScore === undefined ? 'A score is calculated only when every required metric has an explicit approved value.' : 'This preliminary score must be reviewed with its sources and assumptions before an investment decision.')}</p></div></div><DataStatusLegend /></section><section><div className="mb-3 flex items-center justify-between"><h2 className="section-title">{t('Location context')}</h2><RadiusLabel meters={run.analysisRadiusMeters} /></div><MapPanel latitude={site.data?.latitude} longitude={site.data?.longitude} radiusMeters={run.analysisRadiusMeters} className="min-h-[350px]" /></section></div>
+    <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]"><section className="overflow-hidden rounded-xl border border-line"><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left"><thead className="border-b border-line bg-slate-50/60 text-xs uppercase tracking-wide text-muted"><tr><th className="px-5 py-3">{t('Metric')}</th><th className="px-4 py-3">{t('Result')}</th><th className="px-4 py-3">{t('Data status')}</th><th className="px-4 py-3">{t('Source')}</th><th className="px-4 py-3">{t('Assumptions')}</th><th /></tr></thead><tbody className="divide-y divide-line">{run.metrics.map(metric => <MetricRow key={metric.id} metric={metric} selected={selectedMetric?.id === metric.id} onSelect={setSelectedMetricId} />)}</tbody></table></div></section><SourcePanel metric={selectedMetric} runStatus={run.status} /></div>
+    <section className="mt-6 rounded-xl border border-line p-6"><div className="flex items-center gap-2"><Calculator size={18} className="text-brand" /><h2 className="section-title">{t('Choose a franchise plan')}</h2></div><p className="mt-2 text-sm text-muted">{t('Plan values come from the project owner. ROI remains unavailable until approved operating assumptions are supplied.')}</p>{plans.isLoading ? <p className="mt-5 text-sm text-muted">{t('Loading franchise plans…')}</p> : <div className="mt-5 grid gap-4 lg:grid-cols-3">{plans.data?.map(plan => <PlanCard key={plan.code} plan={plan} selected={selectedPlanCode === plan.code} onSelect={setSelectedPlanCode} />)}</div>}{selectedPlan ? <PlanSummary plan={selectedPlan} siteAreaSqWah={toSquareWah(site.data?.landSize, site.data?.landSizeUnit)} /> : null}</section>
+    <div className="mt-6 grid gap-5 lg:grid-cols-2"><section className="rounded-xl border border-line p-6"><h2 className="section-title">{t('Recommendation')}</h2><p className="mt-3 text-sm leading-6 text-muted">{t(run.recommendation)}</p></section><section className="rounded-xl border border-line p-6"><h2 className="section-title">{t('Financial model')}</h2><div className="mt-5 grid grid-cols-2 gap-6"><FinancialValue label={t('ROI (pre-tax)')} value={run.financial?.roiPercentage === undefined ? '—' : `${run.financial.roiPercentage.toFixed(1)}%`} /><FinancialValue label={t('Payback period')} value={run.financial?.paybackMonths === undefined ? '—' : `${run.financial.paybackMonths.toFixed(1)} ${t('months')}`} /></div>{!run.financial ? <p className="mt-4 text-sm text-muted">{t('Requires explicit financial assumptions.')}</p> : null}</section></div>
+    <p className="mt-6 text-xs leading-5 text-muted">{t('Results are preliminary and subject to change as factual data becomes available and assumptions are updated. Electrical utility capacity is not verified unless an actual MEA/PEA source is attached.')}</p>
+  </div>
+}
+
+function MetricRow({ metric, selected, onSelect }: { metric: Metric; selected: boolean; onSelect: (id: string) => void }) {
+  const { t } = useI18n(); const result = formatMetricResult(metric, t)
+  return <tr className={selected ? 'bg-emerald-50/50' : 'hover:bg-slate-50'}><td className="px-5 py-3 text-sm font-semibold">{t(metricKeys[metric.type] || metric.type)}</td><td className="px-4 py-3 text-sm text-muted"><span className={result.available ? 'font-semibold text-ink' : undefined}>{result.text}</span>{result.note ? <span className="mt-1 block text-xs text-muted">{result.note}</span> : null}</td><td className="px-4 py-3"><DataStatus status={metric.status} compact /></td><td className="px-4 py-3 text-sm text-muted">{t(metric.source.name)}</td><td className="px-4 py-3 text-sm text-muted">{metric.assumptions.length ? t('View details') : '—'}</td><td className="pr-3"><button type="button" aria-label={`${t('View source details')}: ${t(metricKeys[metric.type] || metric.type)}`} className="grid h-8 w-8 place-items-center rounded-md text-muted hover:bg-white hover:text-ink" onClick={() => onSelect(metric.id)}><ChevronRight size={16} /></button></td></tr>
+}
+
+function SourcePanel({ metric, runStatus }: { metric?: Metric; runStatus: string }) {
+	const { t, language } = useI18n(); const observation = getRawObservation(metric?.rawValue); const result = metric ? formatMetricResult(metric, t) : undefined; const dateLocale = language === 'th' ? 'th-TH' : 'en-US'
+	return <aside className="rounded-xl border border-line p-5"><div className="flex items-center gap-2"><Database size={18} className="text-brand" /><h2 className="section-title">{t('Source & assumptions')}</h2></div><p className="mt-2 text-sm font-semibold">{metric ? t(metricKeys[metric.type] || metric.type) : t('No metric selected')}</p><dl className="mt-5 space-y-3 text-sm">{result?.available ? <SourceDetail label={t('Observed result')} value={result.text} /> : null}<SourceDetail label={t('Dataset name')} value={metric?.source.name ? t(metric.source.name) : undefined} /><SourceDetail label={t('Dataset version')} value={metric?.source.datasetVersion} /><SourceDetail label={t('Observed date')} value={metric?.source.observedAt ? new Date(metric.source.observedAt).toLocaleString(dateLocale) : undefined} /><SourceDetail label={t('Retrieved')} value={metric?.source.retrievedAt ? new Date(metric.source.retrievedAt).toLocaleString(dateLocale) : undefined} /><SourceDetail label={t('Data source')} value={t(metric?.source.type || '')} /><SourceDetail label={t('Methodology')} value={metric?.source.methodology ? t(metric.source.methodology) : undefined} /><SourceDetail label={t('Run status')} value={t(runStatus)} /></dl>{metric?.type === 'poi' && observation?.places.length ? <PoiSample places={observation.places} /> : null}<div className="mt-5 border-t border-line pt-4"><h3 className="text-sm font-semibold">{t('Key assumptions')}</h3><ul className="mt-2 space-y-2 text-sm leading-5 text-muted">{metric?.assumptions.length ? metric.assumptions.map(item => <li key={item}>— {t(item)}</li>) : <li>—</li>}</ul></div></aside>
+}
+
+function PlanCard({ plan, selected, onSelect }: { plan: FranchisePlan; selected: boolean; onSelect: (code: string) => void }) {
+  const { t, language } = useI18n()
+  return <button type="button" onClick={() => onSelect(plan.code)} className={`rounded-xl border p-5 text-left transition ${selected ? 'border-brand bg-emerald-50 ring-2 ring-emerald-100' : 'border-line hover:border-emerald-300'}`}><span className="text-3xl font-black text-brand">{plan.code}</span><h3 className="mt-1 font-bold">{plan.name}</h3><dl className="mt-4 space-y-2 text-sm"><PlanDetail label={t('Recommended area')} value={`${plan.recommendedAreaSqWah.toLocaleString(language === 'th' ? 'th-TH' : 'en-US')} ${t('sq.wah')}`} /><PlanDetail label={t('EV charging stations')} value={`${plan.evChargingStations}`} /><PlanDetail label={t('Estimated investment')} value={formatInvestment(plan, language)} /><PlanDetail label={t('Starting franchise fee')} value={formatTHB(plan.franchiseFeeThb, language)} /></dl></button>
+}
+
+function PlanSummary({ plan, siteAreaSqWah }: { plan: FranchisePlan; siteAreaSqWah?: number }) {
+  const { t } = useI18n(); const areaIsEnough = siteAreaSqWah !== undefined && siteAreaSqWah >= plan.recommendedAreaSqWah
+  return <div className="mt-5 rounded-xl bg-slate-50 p-5"><h3 className="font-bold">{t('Selected plan')}: {plan.code}</h3>{siteAreaSqWah !== undefined ? <p className={`mt-2 text-sm font-medium ${areaIsEnough ? 'text-emerald-700' : 'text-amber-700'}`}>{areaIsEnough ? t('The supplied land area meets the plan recommendation.') : t('The supplied land area is below the plan recommendation.')}</p> : null}<p className="mt-2 text-sm text-muted">{t('The source does not state whether the franchise fee is included in the investment range, so the system does not add them together.')}</p><p className="mt-2 text-sm text-muted">{t('ROI and payback are not calculated because revenue, utilisation, electricity tariff, rent and operating costs are still missing.')}</p></div>
+}
+
+function SourceDetail({ label, value }: { label: string; value?: string }) { return <div className="grid grid-cols-[120px_1fr] gap-3"><dt className="font-semibold">{label}</dt><dd className="break-words text-muted">{value || '—'}</dd></div> }
+function PlanDetail({ label, value }: { label: string; value: string }) { return <div className="flex justify-between gap-3"><dt className="text-muted">{label}</dt><dd className="font-semibold">{value}</dd></div> }
+function FinancialValue({ label, value }: { label: string; value: string }) { return <div><p className="text-xs font-bold uppercase tracking-wide text-muted">{label}</p><p className="mt-2 text-2xl font-extrabold">{value}</p></div> }
+
+function PoiSample({ places }: { places: RawPlace[] }) {
+  const { t } = useI18n(); const categories = summarizeCategories(places); const namedPlaces: RawPlace[] = []; for (const place of places) if (place.name && namedPlaces.length < 8) namedPlaces.push(place)
+  return <div className="mt-5 border-t border-line pt-4"><h3 className="text-sm font-semibold">{t('POI sample')}</h3><p className="mt-2 text-xs leading-5 text-muted">{t('Stored examples only (up to 100 records). The total observed count includes every returned record.')}</p><h4 className="mt-4 text-xs font-bold uppercase tracking-wide text-muted">{t('Sample categories')}</h4><div className="mt-2 flex flex-wrap gap-2">{categories.map(([category, categoryCount]) => <span key={category} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-ink">{formatCategory(category)} · {categoryCount}</span>)}</div>{namedPlaces.length ? <><h4 className="mt-4 text-xs font-bold uppercase tracking-wide text-muted">{t('Example places')}</h4><ul className="mt-2 space-y-1.5 text-sm text-muted">{namedPlaces.map(place => <li key={`${place.osmType}-${place.osmId}`}><span className="font-medium text-ink">{place.name}</span><span> · {formatCategory(place.category)}</span></li>)}</ul></> : null}</div>
+}
+
+type RawCount = { count: number; radiusMeters: number }
+type RawPlace = { osmType: string; osmId: number; name?: string; category: string }
+type RawObservation = RawCount & { places: RawPlace[] }
+type PopulationValue = { population: number; populationDensityPerKm2: number; areaKm2: number; radiusMeters: number; dataYear: number; resolution: string }
+type RoadValue = { radiusMeters: number; mappedMajorRoadCount: number; nearestMajorRoadMeters?: number; roadClassCounts: Record<string, number> }
+function getRecord(value: unknown): Record<string, unknown> | undefined { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined }
+function finiteNumber(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) }
+function getRawCount(value: unknown): RawCount | undefined { const item = getRecord(value); return item && finiteNumber(item.count) && item.count >= 0 && finiteNumber(item.radiusMeters) && item.radiusMeters > 0 ? { count: item.count, radiusMeters: item.radiusMeters } : undefined }
+function getPopulation(value: unknown): PopulationValue | undefined { const item = getRecord(value); return item && finiteNumber(item.population) && finiteNumber(item.populationDensityPerKm2) && finiteNumber(item.areaKm2) && finiteNumber(item.radiusMeters) && finiteNumber(item.dataYear) && typeof item.resolution === 'string' ? item as unknown as PopulationValue : undefined }
+function getRoad(value: unknown): RoadValue | undefined { const item = getRecord(value); return item && finiteNumber(item.mappedMajorRoadCount) && finiteNumber(item.radiusMeters) && getRecord(item.roadClassCounts) ? item as unknown as RoadValue : undefined }
+function getRawObservation(value: unknown): RawObservation | undefined { const count = getRawCount(value); const candidate = getRecord(value); if (!count || !candidate) return undefined; const places: RawPlace[] = []; if (Array.isArray(candidate.places)) for (const place of candidate.places) { const item = getRecord(place); if (!item || typeof item.osmType !== 'string' || !finiteNumber(item.osmId) || typeof item.category !== 'string') continue; places.push({ osmType: item.osmType, osmId: item.osmId, category: item.category, ...(typeof item.name === 'string' && item.name ? { name: item.name } : {}) }) } return { ...count, places } }
+
+function formatMetricResult(metric: Metric, t: (key: string) => string) {
+  if (metric.type === 'electrical' && metric.status !== 'verified') return { text: t('Utility capacity not verified'), available: false }
+  const population = getPopulation(metric.rawValue); if (population) return { text: `${Math.round(population.population).toLocaleString()} ${t('estimated people')} · ${population.dataYear} · ${population.resolution}`, note: t('Modelled estimate — not an official census count.'), available: true }
+  const road = getRoad(metric.rawValue); if (road) return { text: `${road.mappedMajorRoadCount.toLocaleString()} ${t('mapped major-road segments')}${road.nearestMajorRoadMeters !== undefined ? ` · ${Math.round(road.nearestMajorRoadMeters).toLocaleString()} ${t('m to nearest mapped major road')}` : ''}`, note: t('Road accessibility proxy — not a traffic count.'), available: true }
+  const count = getRawCount(metric.rawValue); if (count) { const label = metric.type === 'competition' ? t('mapped charging stations') : t('points of interest'); return { text: `${count.count.toLocaleString()} ${label} · ${count.radiusMeters / 1000} ${t('km radius')}`, note: t('Observed count only — not a suitability score.'), available: true } }
+  if (metric.normalizedScore !== undefined) return { text: metric.normalizedScore.toFixed(1), available: true }
+  return { text: t('Not available'), available: false }
+}
+
+function summarizeCategories(places: RawPlace[]) { const counts = new Map<string, number>(); for (const place of places) counts.set(place.category, (counts.get(place.category) || 0) + 1); return Array.from(counts.entries()).sort(([firstCategory, firstCount], [secondCategory, secondCount]) => secondCount - firstCount || firstCategory.localeCompare(secondCategory)).slice(0, 6) }
+function formatCategory(category: string) { return category.replace(/^[^:]+:/, '').replaceAll('_', ' ') }
+function formatTHB(value: number, language: string) { return new Intl.NumberFormat(language === 'th' ? 'th-TH' : 'en-US', { style: 'currency', currency: 'THB', maximumFractionDigits: 0 }).format(value) }
+function formatInvestment(plan: FranchisePlan, language: string) { const minimum = formatTHB(plan.investmentMinThb, language); if (plan.investmentMaxThb) return `${minimum} – ${formatTHB(plan.investmentMaxThb, language)}`; if (plan.investmentUpperReferenceThb) return `${minimum} – ${formatTHB(plan.investmentUpperReferenceThb, language)}+`; return `${minimum}+` }
+function toSquareWah(value?: number, unit?: string) { if (value === undefined) return undefined; return unit === 'sqm' ? value / 4 : unit === 'rai' ? value * 400 : unit === 'ngan' ? value * 100 : unit === 'sqwah' ? value : undefined }

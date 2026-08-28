@@ -1,0 +1,13 @@
+.env
+.env.local
+node_modules/
+dist/
+coverage/
+*.log
+*.tsbuildinfo
+.DS_Store
+.idea/
+.vscode/
+apps/api/bin/
+apps/web/playwright-report/
+apps/web/test-results/

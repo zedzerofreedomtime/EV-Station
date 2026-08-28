@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS external_api_cache;
+DROP TABLE IF EXISTS financial_results;
+DROP TABLE IF EXISTS financial_assumptions;
+DROP TABLE IF EXISTS scoring_configs;
+DROP TABLE IF EXISTS competitor_chargers;
+DROP TABLE IF EXISTS poi_records;
+DROP TABLE IF EXISTS analysis_metrics;
+DROP TABLE IF EXISTS analysis_runs;
+DROP TABLE IF EXISTS sites;
+DROP TABLE IF EXISTS users;
+DROP TYPE IF EXISTS analysis_status;
+DROP TYPE IF EXISTS data_status;
