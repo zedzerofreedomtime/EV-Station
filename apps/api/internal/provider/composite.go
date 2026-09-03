@@ -37,17 +37,46 @@ func (p *CompositeProvider) Collect(ctx context.Context, site domain.Site, radiu
 	close(results)
 
 	merged, positions := unavailableObservations()
+	competitionObservations := make([]Observation, 0, len(p.providers))
 	for providerResult := range results {
 		if providerResult.err != nil {
 			continue
 		}
 		for _, observation := range providerResult.observations {
 			position, exists := positions[observation.MetricType]
-			if !exists || observation.Status == domain.DataMissing {
+			if !exists {
 				continue
 			}
-			merged[position] = observation
+			if observation.MetricType == "competition" && observation.Status != domain.DataMissing {
+				competitionObservations = append(competitionObservations, observation)
+				continue
+			}
+			if observation.Status == domain.DataMissing {
+				if merged[position].Status == domain.DataMissing && merged[position].Source.Type == "unavailable" {
+					merged[position] = observation
+				}
+				continue
+			}
+			if dataStatusStrength(observation.Status) > dataStatusStrength(merged[position].Status) {
+				merged[position] = observation
+			}
 		}
 	}
+	if len(competitionObservations) > 0 {
+		merged[positions["competition"]] = mergeCompetitionObservations(competitionObservations, radius)
+	}
 	return merged, nil
+}
+
+func dataStatusStrength(status domain.DataStatus) int {
+	switch status {
+	case domain.DataVerified:
+		return 3
+	case domain.DataEstimated:
+		return 2
+	case domain.DataPreliminary:
+		return 1
+	default:
+		return 0
+	}
 }

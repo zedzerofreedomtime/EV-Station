@@ -15,17 +15,26 @@ export function MapPanel({ latitude, longitude, radiusMeters = 3000, className =
     </div>
   }
   if (!key) {
-    const deltaLatitude = radiusMeters / 111_320
+    const mapPadding = 1.35
+    const deltaLatitude = radiusMeters * mapPadding / 111_320
     const longitudeScale = Math.max(Math.cos(latitude * Math.PI / 180), 0.2)
-    const deltaLongitude = radiusMeters / (111_320 * longitudeScale)
-    const bbox = [longitude - deltaLongitude, latitude - deltaLatitude, longitude + deltaLongitude, latitude + deltaLatitude].map(value => value.toFixed(6)).join('%2C')
-    const source = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${latitude.toFixed(6)}%2C${longitude.toFixed(6)}`
-    return <div className={`overflow-hidden rounded-xl border border-line bg-white ${className}`}><iframe title={t('OpenStreetMap location preview')} src={source} loading="lazy" className="h-full min-h-72 w-full border-0"/><p className="border-t border-line px-3 py-2 text-xs text-muted">© <a className="font-semibold text-brand hover:underline" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a> · {t('Free map preview; not cadastral evidence.')}</p></div>
+    const deltaLongitude = radiusMeters * mapPadding / (111_320 * longitudeScale)
+    const west = longitude - deltaLongitude
+    const south = latitude - deltaLatitude
+    const east = longitude + deltaLongitude
+    const north = latitude + deltaLatitude
+    const bbox = [west, south, east, north].map(value => value.toFixed(6)).join('%2C')
+    const marker = `${latitude.toFixed(6)}%2C${longitude.toFixed(6)}`
+    const source = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${marker}`
+    return <div className={`overflow-hidden rounded-xl border border-line bg-white ${className}`}>
+      <iframe title={t('Map preview')} src={source} className="block h-full min-h-72 w-full border-0" loading="lazy" />
+      <p className="border-t border-line bg-white px-3 py-2 text-xs text-muted">© <a className="font-semibold text-brand hover:underline" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a> · {t('Interactive road map')}</p>
+    </div>
   }
   const center = { lat: latitude, lng: longitude }
   return <div className={`overflow-hidden rounded-xl border border-line ${className}`}>
     <LoadScript googleMapsApiKey={key}>
-      <GoogleMap center={center} zoom={13} mapContainerStyle={{width:'100%', height:'100%', minHeight:'288px'}} options={{streetViewControl:false,mapTypeControl:false,fullscreenControl:false}}>
+      <GoogleMap center={center} zoom={18} mapContainerStyle={{width:'100%', height:'100%', minHeight:'288px'}} options={{streetViewControl:false,mapTypeControl:false,fullscreenControl:false,mapTypeId:'satellite'}}>
         <MarkerF position={center} />
         <CircleF center={center} radius={radiusMeters} options={{strokeColor:'#079455',strokeOpacity:.85,strokeWeight:2,fillColor:'#079455',fillOpacity:.08}} />
       </GoogleMap>

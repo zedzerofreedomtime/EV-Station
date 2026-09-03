@@ -11,7 +11,7 @@ export function DataSourcesPage() {
   const { t } = useI18n()
   const sources = useQuery({ queryKey: ['data-sources'], queryFn: api.getDataSources, staleTime: 60 * 60 * 1000 })
   if (sources.isPending) return <LoadingState label={t('Loading data sources…')} />
-  if (sources.isError) return <ErrorState message={sources.error.message} />
+  if (sources.isError) return <ErrorState error={sources.error} />
   const free = sources.data.filter(item => freeModels.has(item.costModel))
   const deferred = sources.data.filter(item => !freeModels.has(item.costModel))
 
@@ -32,22 +32,24 @@ export function DataSourcesPage() {
 }
 
 function SourceCard({ source }: { source: DataSourceCatalogEntry }) {
-  const { t } = useI18n()
+  const { t, language } = useI18n()
+  const usage = language === 'th' ? t('Read the official source link for provider-specific usage details.') : source.usageNote
+  const quality = language === 'th' ? t('Check data date, coverage and assumptions in the analysis result before use.') : source.dataQualityNote
   return <article className="rounded-xl border border-line bg-white p-5 shadow-sm">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-bold text-ink">{source.name}</h3><p className="mt-1 text-xs uppercase tracking-wide text-muted">{source.categories.join(' · ')}</p></div><Availability value={source.availability}/></div>
-    <dl className="mt-4 space-y-3 text-sm"><div><dt className="font-semibold text-ink">{t('Cost model')}</dt><dd className="mt-1 text-muted">{t(costLabels[source.costModel])}</dd></div><div><dt className="font-semibold text-ink">{t('Usage')}</dt><dd className="mt-1 leading-5 text-muted">{source.usageNote}</dd></div><div><dt className="font-semibold text-ink">{t('Data quality')}</dt><dd className="mt-1 leading-5 text-muted">{source.dataQualityNote}</dd></div></dl>
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-bold text-ink">{t(source.name)}</h3><p className="mt-1 text-xs uppercase tracking-wide text-muted">{source.categories.map(category => t(category)).join(' · ')}</p></div><Availability value={source.availability}/></div>
+    <dl className="mt-4 space-y-3 text-sm"><div><dt className="font-semibold text-ink">{t('Cost model')}</dt><dd className="mt-1 text-muted">{t(costLabels[source.costModel])}</dd></div><div><dt className="font-semibold text-ink">{t('Usage')}</dt><dd className="mt-1 leading-5 text-muted">{usage}</dd></div><div><dt className="font-semibold text-ink">{t('Data quality')}</dt><dd className="mt-1 leading-5 text-muted">{quality}</dd></div></dl>
     {source.credentialEnvVar ? <p className="mt-4 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600"><KeyRound size={14}/>{source.credentialEnvVar}</p> : null}
     <a href={source.referenceUri} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-brand hover:underline">{t('Official source')}<ExternalLink size={14}/></a>
   </article>
 }
 
 const costLabels: Record<DataSourceCostModel, string> = {
-  free_no_key: 'Free · no API key', free_key: 'Free allowance · API key required', free_download: 'Free dataset download', paid_billing: 'Billing required', manual_or_contract: 'Manual verification or contract required',
+  free_no_key: 'Free · no API key', free_key: 'Free allowance · API key required', free_download: 'Free dataset download', free_public_map: 'Free public map', free_allowance_then_paid: 'Free allowance, then paid', paid_billing: 'Billing required', manual_or_contract: 'Manual verification or contract required',
 }
 
 function Availability({ value }: { value: DataSourceCatalogEntry['availability'] }) {
   const { t } = useI18n()
-  const active = value === 'active'
-  const label = { active: 'Active now', requires_key: 'Waiting for free key', planned_import: 'Dataset import planned', deferred_paid: 'Disabled · paid', unavailable: 'Manual verification required' }[value]
+  const active = value === 'active' || value === 'active_reference' || value === 'active_selected_imports'
+  const label = { active: 'Active now', active_reference: 'Reference available', active_selected_imports: 'Selected datasets active', requires_key: 'Waiting for free key', requires_account_and_key: 'Account and API key required', planned_import: 'Dataset import planned', deferred_paid: 'Disabled · paid', unavailable: 'Manual verification required' }[value] || 'Not currently available'
   return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{active ? <CheckCircle2 size={13}/> : <AlertTriangle size={13}/>} {t(label)}</span>
 }

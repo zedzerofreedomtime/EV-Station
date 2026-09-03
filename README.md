@@ -16,12 +16,12 @@ The system does not use AI to invent location facts, scores or financial values.
 
 ## External data providers
 
-Docker Compose enables the `osm` provider for MVP validation. It queries OpenStreetMap through the Overpass API for tagged POIs and mapped EV charging stations around coordinates supplied by the user.
+Docker Compose enables free OpenStreetMap, WorldPop, GISTDA and Department of Highways providers for MVP validation. It queries OpenStreetMap through the Overpass API for tagged POIs and mapped EV charging stations, WorldPop for modelled population, GISTDA's published flood-risk GIS layer, and the Department of Highways AADT CSV plus matched public road control-section geometry around coordinates supplied by the user.
 
 - Results preserve the source URL, retrieval time, methodology, ODbL licence and coverage assumptions.
 - Returned counts are factual observations from the query response, but OpenStreetMap coverage may be incomplete.
 - The provider does not generate normalized POI or competition scores.
-- Traffic, EV demand, population, flood and electrical metrics remain missing until factual providers are configured.
+- Traffic uses a verified AADT value only when its official road number and control section match the closest public DOH road geometry; otherwise it remains an OSM accessibility proxy. Population remains a modelled estimate, flood remains a published-layer overlap observation, and EV demand/electrical capacity remain missing until factual providers are configured.
 - Responses are cached in Redis under `rbc:external:osm:*` with a finite TTL.
 
 Set `ANALYSIS_PROVIDER_MODE=unavailable` to disable external collection or `fixture` in a non-production environment for deterministic workflow testing.
@@ -72,7 +72,7 @@ cd apps/api && go test ./...
 1. Create a candidate site from an address or coordinates.
 2. Save the site with user-supplied provenance.
 3. Run analysis.
-4. Collect provider observations (OpenStreetMap POI and mapped charging-station data in Docker Compose; unavailable remains the safe configuration default).
+4. Collect provider observations (OpenStreetMap POIs and mapped charging stations, WorldPop population estimates, and GISTDA flood-risk layer overlap in Docker Compose; unavailable remains the safe configuration default).
 5. Calculate a score only when every required metric has an explicit score.
 6. Store the result, source metadata and assumptions.
 7. Display an honest result with verified, estimated, preliminary and missing states.

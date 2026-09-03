@@ -43,14 +43,20 @@ type CreateSiteInput struct {
 }
 
 type DataSource struct {
-	Name           string     `json:"name"`
-	Type           string     `json:"type"`
-	ReferenceURI   string     `json:"referenceUri,omitempty"`
-	DatasetVersion string     `json:"datasetVersion,omitempty"`
-	ObservedAt     *time.Time `json:"observedAt,omitempty"`
-	RetrievedAt    time.Time  `json:"retrievedAt"`
-	Methodology    string     `json:"methodology,omitempty"`
-	License        string     `json:"license,omitempty"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	// Authority identifies who publishes the underlying dataset. GeographicScope
+	// makes clear the level at which the source is factual; neither field alone
+	// means that a conclusion has been confirmed for the submitted plot.
+	Authority        string     `json:"authority,omitempty"`
+	GeographicScope  string     `json:"geographicScope,omitempty"`
+	SiteVerification string     `json:"siteVerification,omitempty"`
+	ReferenceURI     string     `json:"referenceUri,omitempty"`
+	DatasetVersion   string     `json:"datasetVersion,omitempty"`
+	ObservedAt       *time.Time `json:"observedAt,omitempty"`
+	RetrievedAt      time.Time  `json:"retrievedAt"`
+	Methodology      string     `json:"methodology,omitempty"`
+	License          string     `json:"license,omitempty"`
 }
 
 type Metric struct {
@@ -76,6 +82,16 @@ type FinancialResult struct {
 	Assumptions          []string `json:"assumptions"`
 }
 
+type ScoringSummary struct {
+	Version                string   `json:"version"`
+	CoveragePercentage     float64  `json:"coveragePercentage"`
+	ScoredMetricCount      int      `json:"scoredMetricCount"`
+	RequiredMetricCount    int      `json:"requiredMetricCount"`
+	ExcludedMetrics        []string `json:"excludedMetrics"`
+	MinimumCoveragePercent float64  `json:"minimumCoveragePercentage"`
+	Limitations            []string `json:"limitations"`
+}
+
 type AnalysisRun struct {
 	ID                   uuid.UUID        `json:"id"`
 	SiteID               uuid.UUID        `json:"siteId"`
@@ -86,7 +102,33 @@ type AnalysisRun struct {
 	Recommendation       string           `json:"recommendation"`
 	Metrics              []Metric         `json:"metrics"`
 	Financial            *FinancialResult `json:"financial,omitempty"`
+	Scoring              *ScoringSummary  `json:"scoring,omitempty"`
 	StartedAt            time.Time        `json:"startedAt"`
 	CompletedAt          *time.Time       `json:"completedAt,omitempty"`
 	CreatedAt            time.Time        `json:"createdAt"`
+}
+
+// AIAssessment is explanatory output generated from an existing analysis run.
+type AIAssessment struct {
+	Summary        string    `json:"summary"`
+	Recommendation string    `json:"recommendation"`
+	Strengths      []string  `json:"strengths"`
+	Risks          []string  `json:"risks"`
+	RequiredChecks []string  `json:"requiredChecks"`
+	Disclaimer     string    `json:"disclaimer"`
+	Language       string    `json:"language"`
+	Model          string    `json:"model"`
+	GeneratedAt    time.Time `json:"generatedAt"`
+}
+
+// AIScoring contains Gemini's evidence-bound scoring recommendation. It can only
+// score metrics for which the backend has already collected usable evidence.
+// The backend validates every value and calculates the weighted total itself.
+type AIScoring struct {
+	MetricScores   map[string]float64 `json:"metricScores"`
+	Recommendation string             `json:"recommendation"`
+	Disclaimer     string             `json:"disclaimer"`
+	Language       string             `json:"language"`
+	Model          string             `json:"model"`
+	GeneratedAt    time.Time          `json:"generatedAt"`
 }

@@ -49,6 +49,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       ANALYSIS_PROVIDER_MODE: osm
       OVERPASS_API_URL: https://overpass-api.de/api/interpreter
+      OVERPASS_FALLBACK_API_URLS: ${OVERPASS_FALLBACK_API_URLS:-}
       NOMINATIM_API_URL: https://nominatim.openstreetmap.org/search
       NOMINATIM_COUNTRY_CODES: th
       GEOCODING_CACHE_TTL: 720h
@@ -59,6 +60,34 @@ services:
       WORLDPOP_RESOLUTION: 100m
       WORLDPOP_CACHE_TTL: 720h
       GISTDA_API_KEY: ${GISTDA_API_KEY:-}
+      GISTDA_FLOOD_RISK_URL: ${GISTDA_FLOOD_RISK_URL:-https://gistdaportal.gistda.or.th/arcgis/rest/services/app/GISTDA_flood/MapServer/1/query}
+      GISTDA_FLOOD_CACHE_TTL: ${GISTDA_FLOOD_CACHE_TTL:-24h}
+      DOH_AADT_CSV_URL: ${DOH_AADT_CSV_URL:-https://opendata.doh.go.th/dataset/ed101df4-f0a1-4d7f-b9d9-76859b2ca73e/resource/f88f9c4e-b32e-4cd1-bf51-4e1f84ba7b16/download/aadt-68.csv}
+      DOH_AADT_ROAD_LAYER_URL: ${DOH_AADT_ROAD_LAYER_URL:-https://giportal.mot.go.th/arcgis/rest/services/Hosted/%E0%B9%80%E0%B8%AA%E0%B9%89%E0%B8%99%E0%B8%97%E0%B8%B2%E0%B8%87%E0%B8%AB%E0%B8%A5%E0%B8%A7%E0%B8%87%E0%B9%81%E0%B8%9C%E0%B9%88%E0%B8%99%E0%B8%94%E0%B8%B4%E0%B8%99_%E0%B8%97%E0%B8%A5/FeatureServer/0/query}
+      DOH_AADT_YEAR: ${DOH_AADT_YEAR:-2568}
+      DOH_AADT_CACHE_TTL: ${DOH_AADT_CACHE_TTL:-24h}
+      DLT_EV_REGISTRATION_CSV_URL: ${DLT_EV_REGISTRATION_CSV_URL:-https://gdcatalog.dlt.go.th/dataset/e8b7d87e-5a3c-4b8b-854c-974d3b600256/resource/e5a037c6-3cc2-415e-b559-e6e85cfba2ca/download/stt_car_fuel_at_25690228.csv}
+      DLT_EV_REGISTRATION_DATASET_DATE: ${DLT_EV_REGISTRATION_DATASET_DATE:-28 February 2569}
+      DLT_EV_REGISTRATION_PREVIOUS_CSV_URL: ${DLT_EV_REGISTRATION_PREVIOUS_CSV_URL:-}
+      DLT_EV_REGISTRATION_PREVIOUS_DATASET_DATE: ${DLT_EV_REGISTRATION_PREVIOUS_DATASET_DATE:-}
+      DLT_EV_REGISTRATION_CACHE_TTL: ${DLT_EV_REGISTRATION_CACHE_TTL:-720h}
+      PROVINCIAL_CHARGER_SUPHANBURI_CSV_URL: ${PROVINCIAL_CHARGER_SUPHANBURI_CSV_URL:-https://suphanburi.gdcatalog.go.th/dataset/c90ca9d9-b1ed-4f0d-bf08-728bac7b72fd/resource/9f1855c3-94d2-478e-95f9-63cc896330bb/download/untitled.csv}
+      PROVINCIAL_CHARGER_SARABURI_JSON_URL: ${PROVINCIAL_CHARGER_SARABURI_JSON_URL:-https://energy.saraburidev.org/api/public/stations}
+      PROVINCIAL_CHARGER_CACHE_TTL: ${PROVINCIAL_CHARGER_CACHE_TTL:-24h}
+      MEA_POWER_MAP_PAGE_URL: ${MEA_POWER_MAP_PAGE_URL:-https://measervice.mea.or.th/powermap/load/index.html}
+      MEA_POWER_MAP_DATA_URL: ${MEA_POWER_MAP_DATA_URL:-https://measervice.mea.or.th/powermap/load/powermap_data.js}
+      MEA_POWER_MAP_YEAR: ${MEA_POWER_MAP_YEAR:-2026}
+      MEA_POWER_MAP_VOLTAGE_KV: ${MEA_POWER_MAP_VOLTAGE_KV:-115}
+      MEA_POWER_MAP_CACHE_TTL: ${MEA_POWER_MAP_CACHE_TTL:-24h}
+      PEA_POWER_MAP_URL: ${PEA_POWER_MAP_URL:-https://ppmload.pea.co.th/}
+      PEA_GRID_STATION_URL: ${PEA_GRID_STATION_URL:-https://gisportal.pea.co.th/arcgis/rest/services/PEA_PAPD/PAPD_T_Station/FeatureServer/0/query}
+      PEA_GRID_CONDUCTOR_URL: ${PEA_GRID_CONDUCTOR_URL:-https://gisportal.pea.co.th/arcgis/rest/services/PEA_PAPD/PAPD_T_Station/FeatureServer/1/query}
+      PEA_GRID_SEARCH_RADIUS_METERS: ${PEA_GRID_SEARCH_RADIUS_METERS:-5000}
+      PEA_GRID_CACHE_TTL: ${PEA_GRID_CACHE_TTL:-24h}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
+      GEMINI_BASE_URL: ${GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
+      GEMINI_TIMEOUT: ${GEMINI_TIMEOUT:-20s}
       CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:8081
     ports:
       - "8080:8080"

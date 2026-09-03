@@ -8,7 +8,7 @@ import (
 	"github.com/rbc/ev-station/apps/api/internal/domain"
 )
 
-var MetricTypes = []string{"traffic", "ev_demand", "population", "poi", "competition", "flood", "electrical"}
+var MetricTypes = []string{"traffic", "road_accessibility", "ev_demand", "population", "poi", "competition", "flood", "electrical"}
 
 type Observation struct {
 	MetricType      string
@@ -51,7 +51,7 @@ type FixtureProvider struct{}
 
 func (FixtureProvider) Collect(_ context.Context, _ domain.Site, _ int) ([]Observation, error) {
 	now := time.Now().UTC()
-	values := map[string]float64{"traffic": 82, "ev_demand": 76, "population": 88, "poi": 84, "competition": 62, "flood": 75, "electrical": 55}
+	values := map[string]float64{"traffic": 82, "road_accessibility": 78, "ev_demand": 76, "population": 88, "poi": 84, "competition": 62, "flood": 75, "electrical": 55}
 	result := make([]Observation, 0, len(MetricTypes))
 	for _, metricType := range MetricTypes {
 		score := values[metricType]

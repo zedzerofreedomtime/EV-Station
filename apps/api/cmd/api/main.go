@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/rbc/ev-station/apps/api/internal/advisory"
 	"github.com/rbc/ev-station/apps/api/internal/analysis"
 	"github.com/rbc/ev-station/apps/api/internal/cache"
 	"github.com/rbc/ev-station/apps/api/internal/config"
@@ -55,17 +56,44 @@ func main() {
 		logger.Warn("using deterministic development fixture provider; results are not factual")
 		dataProvider = provider.FixtureProvider{}
 	} else if cfg.AnalysisProviderMode == "osm" {
-		logger.Info("using free OpenStreetMap and WorldPop providers")
+		logger.Info("using free OpenStreetMap, provincial charger, WorldPop, GISTDA, Department of Highways, DLT, MEA and PEA Power Map providers")
 		osmProvider := provider.NewOSMProvider(provider.OSMConfig{
-			Endpoint:  cfg.OverpassURL,
-			UserAgent: cfg.ExternalUserAgent,
-			CacheTTL:  cfg.RedisCacheTTL,
+			Endpoint: cfg.OverpassURL, FallbackEndpoints: cfg.OverpassFallbackURLs,
+			UserAgent: cfg.ExternalUserAgent, CacheTTL: cfg.RedisCacheTTL,
 		}, &http.Client{Timeout: cfg.ExternalHTTPTimeout}, externalCache)
 		worldPopProvider := provider.NewWorldPopProvider(provider.WorldPopConfig{
 			Endpoint: cfg.WorldPopURL, Year: cfg.WorldPopYear, Resolution: cfg.WorldPopResolution,
 			CacheTTL: cfg.WorldPopCacheTTL, UserAgent: cfg.ExternalUserAgent,
 		}, &http.Client{Timeout: cfg.ExternalHTTPTimeout}, externalCache)
-		dataProvider = provider.NewCompositeProvider(osmProvider, worldPopProvider)
+		gistdaFloodProvider := provider.NewGISTDAFloodProvider(provider.GISTDAFloodConfig{
+			Endpoint: cfg.GISTDAFloodRiskURL, CacheTTL: cfg.GISTDAFloodCacheTTL,
+			UserAgent: cfg.ExternalUserAgent,
+		}, &http.Client{Timeout: cfg.ExternalHTTPTimeout}, externalCache)
+		dohAADTProvider := provider.NewDOHAADTProvider(provider.DOHAADTConfig{
+			CSVURL: cfg.DOHAADTCSVURL, RoadLayerURL: cfg.DOHAADTRoadLayerURL, DataYear: cfg.DOHAADTYear,
+			CacheTTL: cfg.DOHAADTCacheTTL, UserAgent: cfg.ExternalUserAgent,
+		}, &http.Client{Timeout: cfg.ExternalHTTPTimeout}, externalCache)
+		dltEVProvider := provider.NewDLTEVRegistrationProvider(provider.DLTEVRegistrationConfig{
+			CSVURL: cfg.DLTEVRegistrationCSVURL, DatasetDate: cfg.DLTEVRegistrationDatasetDate,
+			PreviousCSVURL: cfg.DLTEVRegistrationPreviousCSVURL, PreviousDatasetDate: cfg.DLTEVRegistrationPreviousDatasetDate,
+			CacheTTL: cfg.DLTEVRegistrationCacheTTL, UserAgent: cfg.ExternalUserAgent,
+		}, nil, externalCache)
+		provincialChargerProvider := provider.NewProvincialChargerProvider(provider.ProvincialChargerConfig{
+			SuphanburiCSVURL: cfg.ProvincialChargerSuphanburiCSVURL,
+			SaraburiJSONURL:  cfg.ProvincialChargerSaraburiJSONURL,
+			CacheTTL:         cfg.ProvincialChargerCacheTTL, UserAgent: cfg.ExternalUserAgent,
+		}, &http.Client{Timeout: cfg.ExternalHTTPTimeout}, externalCache)
+		meaPowerMapProvider := provider.NewMEAPowerMapProvider(provider.MEAPowerMapConfig{
+			PageURL: cfg.MEAPowerMapPageURL, DataURL: cfg.MEAPowerMapDataURL,
+			Year: cfg.MEAPowerMapYear, VoltageKV: cfg.MEAPowerMapVoltageKV,
+			CacheTTL: cfg.MEAPowerMapCacheTTL, UserAgent: cfg.ExternalUserAgent,
+		}, nil, externalCache)
+		peaGridProvider := provider.NewPEAGridProvider(provider.PEAGridConfig{
+			StationURL: cfg.PEAGridStationURL, ConductorURL: cfg.PEAGridConductorURL,
+			SearchRadiusMeters: cfg.PEAGridSearchRadiusMeters, CacheTTL: cfg.PEAGridCacheTTL,
+			UserAgent: cfg.ExternalUserAgent,
+		}, &http.Client{Timeout: cfg.ExternalHTTPTimeout}, externalCache)
+		dataProvider = provider.NewCompositeProvider(osmProvider, provincialChargerProvider, worldPopProvider, gistdaFloodProvider, dohAADTProvider, dltEVProvider, meaPowerMapProvider, peaGridProvider)
 	}
 
 	scoringEngine, err := scoring.New(scoring.DefaultWeights)
@@ -74,12 +102,13 @@ func main() {
 		os.Exit(1)
 	}
 	siteService := site.NewService(repo)
-	analysisService := analysis.NewService(repo, dataProvider, scoringEngine)
+	geminiAdvisory := advisory.NewGeminiService(advisory.GeminiConfig{APIKey: cfg.GeminiAPIKey, Model: cfg.GeminiModel, BaseURL: cfg.GeminiBaseURL, Timeout: cfg.GeminiTimeout}, nil)
+	analysisService := analysis.NewService(repo, dataProvider, scoringEngine, geminiAdvisory)
 	geocoder := provider.NewNominatimGeocoder(provider.NominatimConfig{
 		Endpoint: cfg.NominatimURL, UserAgent: cfg.ExternalUserAgent,
 		CountryCodes: cfg.NominatimCountryCodes, CacheTTL: cfg.GeocodingCacheTTL,
 	}, &http.Client{Timeout: cfg.ExternalHTTPTimeout}, externalCache)
-	handler := httpapi.NewHandler(siteService, analysisService, geocoder, scoring.DefaultWeights)
+	handler := httpapi.NewHandler(siteService, analysisService, geocoder, geminiAdvisory, scoring.DefaultWeights)
 	router := httpapi.NewRouter(cfg, handler)
 	logger.Info("api listening", "port", cfg.Port, "environment", cfg.Environment)
 	if err = router.Run(":" + cfg.Port); err != nil {

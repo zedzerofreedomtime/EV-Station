@@ -10,14 +10,14 @@ func TestCalculateWeightedScore(t *testing.T) {
 		t.Fatal(err)
 	}
 	score, err := engine.Calculate(map[string]*float64{
-		"traffic": ptr(82), "ev_demand": ptr(76), "population": ptr(88),
+		"traffic": ptr(82), "road_accessibility": ptr(78), "ev_demand": ptr(76), "population": ptr(88),
 		"poi": ptr(84), "competition": ptr(62), "flood": ptr(75), "electrical": ptr(55),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if score != 77.3 {
-		t.Fatalf("expected 77.3, got %v", score)
+	if score != 77.1 {
+		t.Fatalf("expected 77.1, got %v", score)
 	}
 }
 

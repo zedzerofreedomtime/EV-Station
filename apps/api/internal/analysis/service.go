@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rbc/ev-station/apps/api/internal/advisory"
 	"github.com/rbc/ev-station/apps/api/internal/domain"
 	"github.com/rbc/ev-station/apps/api/internal/provider"
 	"github.com/rbc/ev-station/apps/api/internal/repository"
@@ -15,10 +16,15 @@ type Service struct {
 	repo     repository.Repository
 	provider provider.AnalysisProvider
 	scoring  *scoring.Engine
+	aiScorer *advisory.Service
 }
 
-func NewService(repo repository.Repository, dataProvider provider.AnalysisProvider, scoringEngine *scoring.Engine) *Service {
-	return &Service{repo: repo, provider: dataProvider, scoring: scoringEngine}
+func NewService(repo repository.Repository, dataProvider provider.AnalysisProvider, scoringEngine *scoring.Engine, aiScorer ...*advisory.Service) *Service {
+	service := &Service{repo: repo, provider: dataProvider, scoring: scoringEngine}
+	if len(aiScorer) > 0 {
+		service.aiScorer = aiScorer[0]
+	}
+	return service
 }
 
 func (s *Service) Run(ctx context.Context, siteID uuid.UUID, radius int) (domain.AnalysisRun, error) {
@@ -46,8 +52,6 @@ func (s *Service) Run(ctx context.Context, siteID uuid.UUID, radius int) (domain
 		return run, err
 	}
 
-	scores := make(map[string]*float64, len(observations))
-	hasMissing := false
 	for _, observation := range observations {
 		metric := domain.Metric{
 			ID: uuid.New(), AnalysisRunID: run.ID, Type: observation.MetricType,
@@ -55,21 +59,11 @@ func (s *Service) Run(ctx context.Context, siteID uuid.UUID, radius int) (domain
 			Status: observation.Status, Source: observation.Source, Assumptions: observation.Assumptions, CreatedAt: time.Now().UTC(),
 		}
 		run.Metrics = append(run.Metrics, metric)
-		scores[observation.MetricType] = observation.NormalizedScore
-		if observation.NormalizedScore == nil || observation.Status == domain.DataMissing {
-			hasMissing = true
-		}
 	}
 
-	if !hasMissing {
-		if score, scoreErr := s.scoring.Calculate(scores); scoreErr == nil {
-			run.OverallScore = &score
-			run.Recommendation = "Preliminary result only. Verify provider data and assumptions before making an investment decision."
-		}
-	} else {
-		run.AssessmentStatus = domain.DataMissing
-		run.Recommendation = "A recommendation is unavailable until the required factual data is supplied or verified."
-	}
+	result := s.scoring.EvaluatePreliminary(run.Metrics)
+	s.applyDeterministicScore(&run, result)
+	s.applyGeminiScore(ctx, &run)
 	run.Status = "completed"
 	completed := time.Now().UTC()
 	run.CompletedAt = &completed
@@ -81,4 +75,102 @@ func (s *Service) Run(ctx context.Context, siteID uuid.UUID, radius int) (domain
 
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (domain.AnalysisRun, error) {
 	return s.repo.GetAnalysis(ctx, id)
+}
+
+func (s *Service) GetLatestCompletedForSite(ctx context.Context, siteID uuid.UUID) (domain.AnalysisRun, error) {
+	return s.repo.GetLatestCompletedAnalysisForSite(ctx, siteID)
+}
+
+// RecalculatePreliminary applies the current deterministic screening rules to
+// the evidence already stored on a completed run. This makes older runs usable
+// without silently replacing their provider data.
+func (s *Service) RecalculatePreliminary(ctx context.Context, id uuid.UUID) (domain.AnalysisRun, error) {
+	run, err := s.repo.GetAnalysis(ctx, id)
+	if err != nil {
+		return domain.AnalysisRun{}, err
+	}
+	result := s.scoring.EvaluatePreliminary(run.Metrics)
+	s.applyDeterministicScore(&run, result)
+	s.applyGeminiScore(ctx, &run)
+	if err := s.repo.UpdateAnalysisScoring(ctx, run); err != nil {
+		return domain.AnalysisRun{}, err
+	}
+	return run, nil
+}
+
+func (s *Service) applyDeterministicScore(run *domain.AnalysisRun, result scoring.PreliminaryResult) {
+	run.Scoring = &result.Summary
+	for index := range run.Metrics {
+		if score, exists := result.MetricScores[run.Metrics[index].Type]; exists {
+			run.Metrics[index].NormalizedScore = &score
+			run.Metrics[index].Assumptions = appendScoringRule(run.Metrics[index].Assumptions, scoring.ScoringRuleAssumption(result.Rules[run.Metrics[index].Type]))
+		} else {
+			run.Metrics[index].NormalizedScore = nil
+		}
+	}
+	if result.Overall != nil {
+		run.OverallScore = result.Overall
+		run.AssessmentStatus = domain.DataPreliminary
+		run.Recommendation = "Preliminary screening score is available. Review data coverage, sources and assumptions before any investment decision."
+		return
+	}
+	run.OverallScore = nil
+	run.AssessmentStatus = domain.DataMissing
+	run.Recommendation = "A preliminary score requires at least 60% weighted data coverage."
+}
+
+func (s *Service) applyGeminiScore(ctx context.Context, run *domain.AnalysisRun) {
+	if s.aiScorer == nil || run.OverallScore == nil {
+		return
+	}
+	aiResult, err := s.aiScorer.Score(ctx, *run, "th")
+	if err != nil {
+		// A missing key, quota exhaustion or invalid model output must never hide
+		// the evidence-backed screening score already available to staff.
+		return
+	}
+	eligible := make(map[string]bool, len(run.Metrics))
+	for index := range run.Metrics {
+		if run.Metrics[index].NormalizedScore != nil {
+			eligible[run.Metrics[index].Type] = true
+		}
+	}
+	updated := 0
+	for index := range run.Metrics {
+		metric := &run.Metrics[index]
+		score, ok := aiResult.MetricScores[metric.Type]
+		if !ok || !eligible[metric.Type] || score < 0 || score > 100 {
+			continue
+		}
+		metric.NormalizedScore = &score
+		metric.Assumptions = appendScoringRule(metric.Assumptions, "Gemini assisted scoring: proposed from the collected evidence only; requires staff review.")
+		updated++
+	}
+	if updated == 0 {
+		return
+	}
+	result := s.scoring.EvaluatePreliminary(run.Metrics)
+	if result.Overall == nil {
+		return
+	}
+	run.OverallScore = result.Overall
+	run.Scoring = &result.Summary
+	run.Scoring.Version = "gemini-assisted-v1"
+	run.Scoring.Limitations = append(run.Scoring.Limitations,
+		"Gemini proposed the individual metric scores from the collected evidence; the backend validated the values and calculated the weighted total.",
+		"Gemini model: "+aiResult.Model+". The recommendation remains preliminary and requires staff review.",
+	)
+	run.Recommendation = aiResult.Recommendation
+	if run.Recommendation == "" {
+		run.Recommendation = "AI-assisted preliminary screening score is available. Review data coverage, sources and assumptions before any investment decision."
+	}
+}
+
+func appendScoringRule(assumptions []string, rule string) []string {
+	for _, assumption := range assumptions {
+		if assumption == rule {
+			return assumptions
+		}
+	}
+	return append(assumptions, rule)
 }

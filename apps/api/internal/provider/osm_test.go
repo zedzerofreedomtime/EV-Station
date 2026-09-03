@@ -53,11 +53,11 @@ func TestOSMProviderCollectsPOIAndCompetitionWithoutInventingScores(t *testing.T
 			t.Fatalf("expected deduplicated count for %s, got %s", metricType, observation.RawValue)
 		}
 	}
-	if byType["traffic"].Status != domain.DataPreliminary || byType["traffic"].NormalizedScore != nil {
-		t.Fatalf("traffic must be a preliminary road proxy without a score: %+v", byType["traffic"])
+	if byType["road_accessibility"].Status != domain.DataPreliminary || byType["road_accessibility"].NormalizedScore != nil {
+		t.Fatalf("road accessibility must be a preliminary road proxy without a score: %+v", byType["road_accessibility"])
 	}
-	if !strings.Contains(string(byType["traffic"].RawValue), `"mappedMajorRoadCount":1`) {
-		t.Fatalf("expected one mapped major road, got %s", byType["traffic"].RawValue)
+	if !strings.Contains(string(byType["road_accessibility"].RawValue), `"mappedMajorRoadCount":1`) {
+		t.Fatalf("expected one mapped major road, got %s", byType["road_accessibility"].RawValue)
 	}
 }
 

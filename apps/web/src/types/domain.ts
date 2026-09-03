@@ -29,6 +29,9 @@ export interface CreateSiteInput {
 export interface DataSource {
   name: string
   type: string
+  authority?: 'official' | 'modelled' | 'community' | 'customer_supplied' | 'unknown'
+  geographicScope?: 'province' | 'district' | 'subdistrict' | 'site_radius' | 'published_station_area' | 'plot'
+  siteVerification?: 'verified_at_dataset_scope' | 'modelled_for_site_radius' | 'preliminary_map_lookup' | 'utility_confirmed'
   referenceUri?: string
   datasetVersion?: string
   observedAt?: string
@@ -88,9 +91,30 @@ export interface AnalysisRun {
   recommendation: string
   metrics: Metric[]
   financial?: FinancialResult
+  scoring?: {
+    version: string
+    coveragePercentage: number
+    scoredMetricCount: number
+    requiredMetricCount: number
+    excludedMetrics: string[]
+    minimumCoveragePercentage: number
+    limitations: string[]
+  }
   startedAt: string
   completedAt?: string
   createdAt: string
+}
+
+export interface AIAssessment {
+  summary: string
+  recommendation: string
+  strengths: string[]
+  risks: string[]
+  requiredChecks: string[]
+  disclaimer: string
+  language: 'th' | 'en'
+  model: string
+  generatedAt: string
 }
 
 export interface GeocodingResult {
@@ -104,14 +128,16 @@ export interface GeocodingResult {
   assumptions: string[]
 }
 
-export type DataSourceCostModel = 'free_no_key' | 'free_key' | 'free_download' | 'paid_billing' | 'manual_or_contract'
+export interface GoogleMapsResolution { inputUrl: string; resolvedUrl: string; latitude: number; longitude: number }
+
+export type DataSourceCostModel = 'free_no_key' | 'free_key' | 'free_download' | 'free_public_map' | 'free_allowance_then_paid' | 'paid_billing' | 'manual_or_contract'
 
 export interface DataSourceCatalogEntry {
   id: string
   name: string
   categories: string[]
   costModel: DataSourceCostModel
-  availability: 'active' | 'requires_key' | 'planned_import' | 'deferred_paid' | 'unavailable'
+  availability: 'active' | 'active_reference' | 'active_selected_imports' | 'requires_key' | 'requires_account_and_key' | 'planned_import' | 'deferred_paid' | 'unavailable'
   credentialEnvVar?: string
   referenceUri: string
   usageNote: string

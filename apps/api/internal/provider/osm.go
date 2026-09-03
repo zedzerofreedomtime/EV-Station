@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rbc/ev-station/apps/api/internal/cache"
@@ -19,9 +20,10 @@ import (
 )
 
 type OSMConfig struct {
-	Endpoint  string
-	UserAgent string
-	CacheTTL  time.Duration
+	Endpoint          string
+	FallbackEndpoints []string
+	UserAgent         string
+	CacheTTL          time.Duration
 }
 
 type OSMProvider struct {
@@ -61,9 +63,11 @@ type osmPlace struct {
 }
 
 type osmMetricValue struct {
-	Count        int        `json:"count"`
-	RadiusMeters int        `json:"radiusMeters"`
-	Places       []osmPlace `json:"places"`
+	Count                    int        `json:"count"`
+	RadiusMeters             int        `json:"radiusMeters"`
+	Places                   []osmPlace `json:"places"`
+	ResidentialBuildingCount int        `json:"residentialBuildingCount,omitempty"`
+	CommunityAreaCount       int        `json:"communityAreaCount,omitempty"`
 }
 
 type osmRoadMetricValue struct {
@@ -89,7 +93,7 @@ func NewOSMProvider(config OSMConfig, client *http.Client, externalCache cache.C
 func (p *OSMProvider) Collect(ctx context.Context, site domain.Site, radius int) ([]Observation, error) {
 	observations, positions := unavailableObservations()
 	if site.Latitude == nil || site.Longitude == nil {
-		setMissingOSMObservation(observations, positions, "traffic", "Valid coordinates are required to query OpenStreetMap road-accessibility data.")
+		setMissingOSMObservation(observations, positions, "road_accessibility", "Valid coordinates are required to query OpenStreetMap road-accessibility data.")
 		setMissingOSMObservation(observations, positions, "poi", "Valid coordinates are required to query OpenStreetMap POI data.")
 		setMissingOSMObservation(observations, positions, "competition", "Valid coordinates are required to query OpenStreetMap charging stations.")
 		return observations, nil
@@ -98,23 +102,27 @@ func (p *OSMProvider) Collect(ctx context.Context, site domain.Site, radius int)
 		radius = 3000
 	}
 
-	query := buildOverpassQuery(*site.Latitude, *site.Longitude, radius)
-	payload, err := p.fetch(ctx, query)
-	if err != nil {
-		setMissingOSMObservation(observations, positions, "poi", "OpenStreetMap provider was unavailable; no POI value or score was produced.")
-		setMissingOSMObservation(observations, positions, "competition", "OpenStreetMap provider was unavailable; no competitor value or score was produced.")
-		return observations, nil
+	type queryResult struct {
+		kind    string
+		payload []byte
+		err     error
 	}
-
-	var response osmResponse
-	if err = json.Unmarshal(payload, &response); err != nil {
-		setMissingOSMObservation(observations, positions, "poi", "OpenStreetMap returned an unreadable response; no POI value or score was produced.")
-		setMissingOSMObservation(observations, positions, "competition", "OpenStreetMap returned an unreadable response; no competitor value or score was produced.")
-		return observations, nil
+	results := make(chan queryResult, 2)
+	var wait sync.WaitGroup
+	for kind, query := range map[string]string{
+		"context": buildOverpassContextQuery(*site.Latitude, *site.Longitude, radius),
+		"roads":   buildOverpassRoadQuery(*site.Latitude, *site.Longitude, radius),
+	} {
+		wait.Add(1)
+		go func(kind, query string) {
+			defer wait.Done()
+			payload, err := p.fetch(ctx, query)
+			results <- queryResult{kind: kind, payload: payload, err: err}
+		}(kind, query)
 	}
+	wait.Wait()
+	close(results)
 
-	poi, chargers := classifyOSMElements(response.Elements)
-	roads := classifyOSMRoads(response.Elements)
 	retrievedAt := time.Now().UTC()
 	source := domain.DataSource{
 		Name:         "OpenStreetMap via Overpass API",
@@ -125,18 +133,49 @@ func (p *OSMProvider) Collect(ctx context.Context, site domain.Site, radius int)
 		License:      "Open Data Commons Open Database License (ODbL) 1.0",
 	}
 
-	observations[positions["poi"]] = osmObservation("poi", poi, radius, source, []string{
-		"Coverage depends on voluntary OpenStreetMap contributions and may be incomplete.",
-		"This is a factual count of returned tagged elements, not a normalized suitability score.",
-	})
-	observations[positions["competition"]] = osmObservation("competition", chargers, radius, source, []string{
-		"Only charging stations mapped in OpenStreetMap are included; unmapped operators may be missing.",
-		"Connector availability, power, pricing, and operational status are not verified by this query.",
-		"No competition score is produced until a deterministic scoring rule is approved.",
-	})
-	roadSource := source
-	roadSource.Methodology = "Count mapped motorway, trunk, primary, secondary and tertiary ways within the radius and approximate the nearest distance from returned way geometry vertices."
-	observations[positions["traffic"]] = osmRoadObservation(roads, *site.Latitude, *site.Longitude, radius, roadSource)
+	for result := range results {
+		if result.err != nil {
+			if result.kind == "roads" {
+				setMissingOSMObservation(observations, positions, "road_accessibility", "OpenStreetMap road query was unavailable; no road-accessibility value or score was produced.")
+			} else {
+				setMissingOSMObservation(observations, positions, "poi", "OpenStreetMap place query was unavailable; no POI value or score was produced.")
+				setMissingOSMObservation(observations, positions, "competition", "OpenStreetMap charging-station query was unavailable; no competitor value or score was produced.")
+			}
+			continue
+		}
+		var response osmResponse
+		if err := json.Unmarshal(result.payload, &response); err != nil {
+			if result.kind == "roads" {
+				setMissingOSMObservation(observations, positions, "road_accessibility", "OpenStreetMap returned an unreadable road response; no road-accessibility value or score was produced.")
+			} else {
+				setMissingOSMObservation(observations, positions, "poi", "OpenStreetMap returned an unreadable place response; no POI value or score was produced.")
+				setMissingOSMObservation(observations, positions, "competition", "OpenStreetMap returned an unreadable charging-station response; no competitor value or score was produced.")
+			}
+			continue
+		}
+		if result.kind == "roads" {
+			roadSource := source
+			roadSource.Methodology = "Count mapped motorway, trunk, primary, secondary and tertiary ways within the radius and approximate the nearest distance from returned way geometry vertices."
+			observations[positions["road_accessibility"]] = osmRoadObservation(classifyOSMRoads(response.Elements), *site.Latitude, *site.Longitude, radius, roadSource)
+			continue
+		}
+		poi, chargers, communities := classifyOSMElements(response.Elements)
+		observations[positions["poi"]] = osmObservation("poi", poi, radius, source, []string{
+			"Coverage depends on voluntary OpenStreetMap contributions and may be incomplete.",
+			"This is a factual count of returned tagged elements, not a normalized suitability score.",
+		}, communities)
+		competition := osmObservation("competition", chargers, radius, source, []string{
+			"Only charging stations mapped in OpenStreetMap are included; unmapped operators may be missing.",
+			"Connector availability, power, pricing, and operational status are not verified by this query.",
+			"The provider supplies evidence only; deterministic preliminary-v1 scoring is applied separately by backend logic.",
+		}, osmCommunityEvidence{})
+		// OSM can provide evidence of mapped competitors, but an empty OSM
+		// result cannot establish that a province has no competitors.
+		if len(chargers) == 0 {
+			competition.Status = domain.DataPreliminary
+		}
+		observations[positions["competition"]] = competition
+	}
 	return observations, nil
 }
 
@@ -148,32 +187,46 @@ func (p *OSMProvider) fetch(ctx context.Context, query string) ([]byte, error) {
 	}
 
 	form := url.Values{"data": {query}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.config.Endpoint, strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, err
+	endpoints := append([]string{p.config.Endpoint}, p.config.FallbackEndpoints...)
+	var lastErr error
+	for _, endpoint := range endpoints {
+		endpoint = strings.TrimSpace(endpoint)
+		if endpoint == "" {
+			continue
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", p.config.UserAgent)
+		response, err := p.client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		payload, readErr := io.ReadAll(io.LimitReader(response.Body, 10<<20))
+		response.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			continue
+		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			lastErr = fmt.Errorf("overpass returned status %d", response.StatusCode)
+			continue
+		}
+		_ = p.cache.Set(ctx, cacheKey, payload, p.config.CacheTTL)
+		return payload, nil
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", p.config.UserAgent)
-
-	response, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no Overpass endpoint configured")
 	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-		return nil, fmt.Errorf("overpass returned status %d", response.StatusCode)
-	}
-	payload, err := io.ReadAll(io.LimitReader(response.Body, 10<<20))
-	if err != nil {
-		return nil, err
-	}
-	_ = p.cache.Set(ctx, cacheKey, payload, p.config.CacheTTL)
-	return payload, nil
+	return nil, lastErr
 }
 
-func buildOverpassQuery(latitude, longitude float64, radius int) string {
+func buildOverpassContextQuery(latitude, longitude float64, radius int) string {
 	lat := strconv.FormatFloat(latitude, 'f', 6, 64)
 	lon := strconv.FormatFloat(longitude, 'f', 6, 64)
 	r := strconv.Itoa(radius)
@@ -183,11 +236,25 @@ func buildOverpassQuery(latitude, longitude float64, radius int) string {
 		`nwr(around:` + r + `,` + lat + `,` + lon + `)["shop"];` +
 		`nwr(around:` + r + `,` + lat + `,` + lon + `)["tourism"];` +
 		`nwr(around:` + r + `,` + lat + `,` + lon + `)["leisure"];` +
-		`);out center tags;` +
-		`way(around:` + r + `,` + lat + `,` + lon + `)["highway"~"^(motorway|trunk|primary|secondary|tertiary)$"];out geom tags;`
+		`nwr(around:` + r + `,` + lat + `,` + lon + `)["building"="residential"];` +
+		`nwr(around:` + r + `,` + lat + `,` + lon + `)["landuse"="residential"];` +
+		`nwr(around:` + r + `,` + lat + `,` + lon + `)["place"~"^(neighbourhood|suburb|quarter|village|town)$"];` +
+		`);out center tags;`
 }
 
-func classifyOSMElements(elements []osmElement) (poi []osmPlace, chargers []osmPlace) {
+func buildOverpassRoadQuery(latitude, longitude float64, radius int) string {
+	lat := strconv.FormatFloat(latitude, 'f', 6, 64)
+	lon := strconv.FormatFloat(longitude, 'f', 6, 64)
+	r := strconv.Itoa(radius)
+	return `[out:json][timeout:20];way(around:` + r + `,` + lat + `,` + lon + `)["highway"~"^(motorway|trunk|primary|secondary|tertiary)$"];out geom tags;`
+}
+
+type osmCommunityEvidence struct {
+	ResidentialBuildingCount int
+	CommunityAreaCount       int
+}
+
+func classifyOSMElements(elements []osmElement) (poi []osmPlace, chargers []osmPlace, communities osmCommunityEvidence) {
 	seen := make(map[string]struct{}, len(elements))
 	for _, element := range elements {
 		if element.Tags["highway"] != "" {
@@ -198,6 +265,14 @@ func classifyOSMElements(elements []osmElement) (poi []osmPlace, chargers []osmP
 			continue
 		}
 		seen[key] = struct{}{}
+		if element.Tags["building"] == "residential" {
+			communities.ResidentialBuildingCount++
+			continue
+		}
+		if element.Tags["landuse"] == "residential" || element.Tags["place"] == "neighbourhood" || element.Tags["place"] == "suburb" || element.Tags["place"] == "quarter" || element.Tags["place"] == "village" || element.Tags["place"] == "town" {
+			communities.CommunityAreaCount++
+			continue
+		}
 		category := osmCategory(element.Tags)
 		place := osmPlace{OSMType: element.Type, OSMID: element.ID, Name: element.Tags["name"], Category: category, Latitude: element.Lat, Longitude: element.Lon}
 		if element.Center != nil {
@@ -209,7 +284,7 @@ func classifyOSMElements(elements []osmElement) (poi []osmPlace, chargers []osmP
 		}
 		poi = append(poi, place)
 	}
-	return poi, chargers
+	return poi, chargers, communities
 }
 
 func classifyOSMRoads(elements []osmElement) []osmElement {
@@ -243,12 +318,12 @@ func osmRoadObservation(roads []osmElement, latitude, longitude float64, radius 
 	}
 	raw, _ := json.Marshal(osmRoadMetricValue{RadiusMeters: radius, MappedMajorRoadCount: len(roads), NearestMajorRoadMeters: nearest, RoadClassCounts: classCounts})
 	return Observation{
-		MetricType: "traffic", RawValue: raw, Status: domain.DataPreliminary, Source: source,
+		MetricType: "road_accessibility", RawValue: raw, Status: domain.DataPreliminary, Source: source,
 		Assumptions: []string{
 			"This is a road accessibility proxy from mapped road classes, not a traffic count, speed, congestion, or AADT measurement.",
 			"Nearest-road distance is approximated from the returned OpenStreetMap way geometry vertices.",
 			"OpenStreetMap road classification and coverage may be incomplete or differ from official Thai classifications.",
-			"No normalized traffic score is produced in this MVP.",
+			"The provider supplies evidence only; deterministic preliminary-v1 scoring is applied separately by backend logic.",
 		},
 	}
 }
@@ -272,13 +347,13 @@ func osmCategory(tags map[string]string) string {
 	return "other"
 }
 
-func osmObservation(metricType string, places []osmPlace, radius int, source domain.DataSource, assumptions []string) Observation {
+func osmObservation(metricType string, places []osmPlace, radius int, source domain.DataSource, assumptions []string, communities osmCommunityEvidence) Observation {
 	count := len(places)
 	if len(places) > 100 {
 		places = places[:100]
 		assumptions = append(assumptions, "The response preserves at most 100 example places; count remains the full deduplicated total.")
 	}
-	raw, _ := json.Marshal(osmMetricValue{Count: count, RadiusMeters: radius, Places: places})
+	raw, _ := json.Marshal(osmMetricValue{Count: count, RadiusMeters: radius, Places: places, ResidentialBuildingCount: communities.ResidentialBuildingCount, CommunityAreaCount: communities.CommunityAreaCount})
 	return Observation{MetricType: metricType, RawValue: raw, Status: domain.DataVerified, Source: source, Assumptions: assumptions}
 }
 

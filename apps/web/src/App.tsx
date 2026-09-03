@@ -10,13 +10,14 @@ const NewSitePage = lazy(() => import('./pages/NewSitePage').then(module => ({ d
 const SitePage = lazy(() => import('./pages/SitePage').then(module => ({ default: module.SitePage })))
 const DataSourcesPage = lazy(() => import('./pages/DataSourcesPage').then(module => ({ default: module.DataSourcesPage })))
 
-function Placeholder({ title }: { title: string }) { return <div><h1 className="page-title">{title}</h1><p className="mt-3 text-muted">This module is prepared for a later MVP iteration.</p></div> }
+function Placeholder({ title }: { title: string }) { const { t } = useI18n(); return <div><h1 className="page-title">{title}</h1><p className="mt-3 text-muted">{t('This module is prepared for a later MVP iteration.')}</p></div> }
 
 export default function App() {
   const { t } = useI18n()
   return <AppShell><Suspense fallback={<LoadingState label={t('Loading page…')}/> }><Routes>
     <Route path="/" element={<DashboardPage />} />
     <Route path="/sites/new" element={<NewSitePage />} />
+		<Route path="/sites/:id/edit" element={<NewSitePage />} />
     <Route path="/sites/:id" element={<SitePage />} />
     <Route path="/analysis/:id" element={<AnalysisPage />} />
     <Route path="/analyses" element={<Placeholder title={t('Analyses')} />} />

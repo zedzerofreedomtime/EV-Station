@@ -11,13 +11,14 @@ var (
 )
 
 var DefaultWeights = map[string]float64{
-	"traffic":     0.25,
-	"ev_demand":   0.20,
-	"population":  0.15,
-	"poi":         0.15,
-	"competition": 0.15,
-	"flood":       0.05,
-	"electrical":  0.05,
+	"traffic":            0.20,
+	"road_accessibility": 0.05,
+	"ev_demand":          0.20,
+	"population":         0.15,
+	"poi":                0.15,
+	"competition":        0.15,
+	"flood":              0.05,
+	"electrical":         0.05,
 }
 
 type Engine struct{ Weights map[string]float64 }

@@ -45,6 +45,31 @@ func (m *Memory) GetSite(_ context.Context, id uuid.UUID) (domain.Site, error) {
 	return site, nil
 }
 
+func (m *Memory) UpdateSite(_ context.Context, site domain.Site) (domain.Site, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sites[site.ID]; !ok {
+		return domain.Site{}, ErrNotFound
+	}
+	m.sites[site.ID] = site
+	return site, nil
+}
+
+func (m *Memory) DeleteSite(_ context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sites[id]; !ok {
+		return ErrNotFound
+	}
+	delete(m.sites, id)
+	for analysisID, run := range m.analyses {
+		if run.SiteID == id {
+			delete(m.analyses, analysisID)
+		}
+	}
+	return nil
+}
+
 func (m *Memory) CreateAnalysis(_ context.Context, run domain.AnalysisRun) (domain.AnalysisRun, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -59,6 +84,16 @@ func (m *Memory) CompleteAnalysis(_ context.Context, run domain.AnalysisRun) err
 	return nil
 }
 
+func (m *Memory) UpdateAnalysisScoring(_ context.Context, run domain.AnalysisRun) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.analyses[run.ID]; !ok {
+		return ErrNotFound
+	}
+	m.analyses[run.ID] = run
+	return nil
+}
+
 func (m *Memory) GetAnalysis(_ context.Context, id uuid.UUID) (domain.AnalysisRun, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -67,4 +102,24 @@ func (m *Memory) GetAnalysis(_ context.Context, id uuid.UUID) (domain.AnalysisRu
 		return domain.AnalysisRun{}, ErrNotFound
 	}
 	return run, nil
+}
+
+func (m *Memory) GetLatestCompletedAnalysisForSite(_ context.Context, siteID uuid.UUID) (domain.AnalysisRun, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var latest domain.AnalysisRun
+	found := false
+	for _, run := range m.analyses {
+		if run.SiteID != siteID || run.Status != "completed" {
+			continue
+		}
+		if !found || run.CreatedAt.After(latest.CreatedAt) {
+			latest = run
+			found = true
+		}
+	}
+	if !found {
+		return domain.AnalysisRun{}, ErrNotFound
+	}
+	return latest, nil
 }

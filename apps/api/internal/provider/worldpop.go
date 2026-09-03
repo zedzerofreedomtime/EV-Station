@@ -95,7 +95,7 @@ func (p *WorldPopProvider) Collect(ctx context.Context, site domain.Site, radius
 	observations[positions["population"]] = Observation{
 		MetricType: "population", RawValue: raw, Status: domain.DataEstimated,
 		Source: domain.DataSource{
-			Name: "WorldPop Global 2 Population Data", Type: "modelled_open_data_api",
+			Name: "WorldPop Global 2 Population Data", Type: "modelled_open_data_api", Authority: "modelled", GeographicScope: "site_radius", SiteVerification: "modelled_for_site_radius",
 			ReferenceURI: "https://api.worldpop.org/v2/", DatasetVersion: result.DataSource,
 			RetrievedAt: time.Now().UTC(), Methodology: "WorldPop population cells aggregated by its API within a generated circular polygon around the site.",
 			License: "WorldPop data terms and dataset citation apply",
@@ -103,7 +103,7 @@ func (p *WorldPopProvider) Collect(ctx context.Context, site domain.Site, radius
 		Assumptions: []string{
 			"WorldPop is a modelled population estimate, not an official census count for the site.",
 			"The query uses a 32-segment approximation of the requested radius.",
-			"Population is not converted into a suitability score in this MVP.",
+			"The provider supplies evidence only; deterministic preliminary-v1 scoring is applied separately by backend logic.",
 		},
 	}
 	return observations, nil
@@ -195,7 +195,7 @@ func (p *WorldPopProvider) poll(ctx context.Context, taskID string) (worldPopRes
 }
 
 func (p *WorldPopProvider) missing(assumption string) Observation {
-	return Observation{MetricType: "population", Status: domain.DataMissing, Source: domain.DataSource{Name: "WorldPop Global 2 Population Data", Type: "modelled_open_data_api", ReferenceURI: "https://api.worldpop.org/v2/", RetrievedAt: time.Now().UTC()}, Assumptions: []string{assumption}}
+	return Observation{MetricType: "population", Status: domain.DataMissing, Source: domain.DataSource{Name: "WorldPop Global 2 Population Data", Type: "modelled_open_data_api", Authority: "modelled", GeographicScope: "site_radius", ReferenceURI: "https://api.worldpop.org/v2/", RetrievedAt: time.Now().UTC()}, Assumptions: []string{assumption}}
 }
 
 func circlePolygon(latitude, longitude float64, radius, segments int) map[string]any {
